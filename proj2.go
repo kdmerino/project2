@@ -136,7 +136,7 @@ func InitUser(username string, password string) (userdataptr *User, err error) {
 	user.Username = username
 	user.SignKeyLock = signLock
 	user.SignKeyUser = signUser
-	user.PersonalKey = privateKey
+	user.PersonalKey = userlib.Argon2Key(privateKey, userlib.RandomBytes(16), 16)
 	user.fileUUIDs = make(map[string]uuid.UUID)
 
 	// Encrypt
@@ -175,8 +175,8 @@ func GetUser(username string, password string) (userdataptr *User, err error) {
 	beUser, found := userlib.DatastoreGet(userUUID)
 	if found {
 		dbUser := userlib.SymDec(userKey, beUser)
-		dErr := json.Unmarshal(dbUser, sUser)
-		if dErr == nil {
+		err = json.Unmarshal(dbUser, &sUser)
+		if err == nil {
 			// Verify the integrity of User, and Lock
 			verifyUser, _ := userlib.KeystoreGet(username)
 			resultUser := userlib.DSVerify(verifyUser, sUser.MyUser, sUser.UserSign)
@@ -184,13 +184,25 @@ func GetUser(username string, password string) (userdataptr *User, err error) {
 			resultLock := userlib.DSVerify(verifyLock, sUser.MyLock, sUser.LockSign)
 
 			if resultUser == nil && resultLock == nil {
-				// pick up in here.
+				lockBlock := userlib.SymDec(userKey, sUser.MyLock)
+				privateKey := userlib.Argon2Key(userPass, lockBlock, 16)
+				bUser := userlib.SymDec(privateKey, sUser.MyUser)
+				err = json.Unmarshal(bUser, &user)
+				userdataptr = &user
+			} else {
+				if resultUser == nil {
+					err = resultUser
+				} else {
+					err = resultLock
+				}
 			}
-
 		}
 		// else User was corrupted
+	} else {
+		err = errors.New("User Not found")
+		userdataptr = nil
 	}
-	// else User not found
+	return userdataptr, err
 	// +---------------------------+ My Code Above Here +---------------------------+
 }
 
