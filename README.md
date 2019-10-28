@@ -1,5 +1,6 @@
 # Project2
 ## CS161 | Project 2
+### Kevin Merino & Isabelle 
 We want to design and implement a file sharing system (like Dropbox) that protects user privacy. In particular, user files are always *encrypted* and *authenticated* on the server. In addition,
 users can share files with each other.
 
@@ -27,18 +28,19 @@ users can share files with each other.
 
 ### User Verification
 1. Determine UUID for encrypted signed-user structure in Datastore server.
-   Firstly, convert UName into a byte slice passed into `uuid.FromBytes`.
+Firstly, use `Argon2Key` on *password*, *user name*, 128.
+Secondly, call `uuid.FromBytes` with the returned slice. 
 2. Retrieve encrypted bytes from data store via UUID.
-3. Decrypt into bytes of signed-user structure using `SymDec`
+3. Decrypt bytes of signed-user structure using `SymDec`
 with *key* set to user password.
-1. Define variable to hold signed-user structure, call `json.Unmarshal` on decrypted bytes and defined variable.
-2. If error is nil, signed-user will contain User struct, userUUID, userSignature, a slice of bytes, sliceUUID, sliceSignature.
-   Run `DSVerify` and procede if no tampering has occurred on either object.
-3. Using `Aargon2Key` with user password, and the recovered slice of bytes create a 128 bit key.
-4. Decrypt into bytes of User structure using `SymDec` with *key* 
+4. Define variable to hold signed-user structure, call `json.Unmarshal` on decrypted bytes and defined variable.
+5. If error is nil, signed-user will contain User struct, userUUID, userSignature, a slice of bytes, sliceSignature.
+   Run `DSVerify` and procede if no tampering has occurred on either object. Signatures are available in keyStore by username, username + "lock".
+6. Using `Aargon2Key` with user password, and the recovered slice of bytes create a 128 bit key.
+7. Decrypt into bytes of User structure using `SymDec` with *key* 
 as the 128 bit key just derived.
-5. Define variable to hold User struct, call `json.Unmarshal` on decrypted bytes and defined variable.
-6.  If error is nil, we have decrypted, verified interigity, and authenticity. 
+8. Define variable to hold User struct, call `json.Unmarshal` on decrypted bytes and defined variable.
+9.  If error is nil, we have decrypted, verified interigity, and authenticity. 
 
 Notice we use a decrypt, signature check, and decrypt again 
 technique which protects the encrypted User via a signature and 
@@ -76,22 +78,60 @@ reducing our access time to a constant (page size).
 **InitUser(username string, password string)**
 (userdataptr *User, err error)
 ```
-1. What variables require storage in userdataptr?
-2. Where should userdataptr be saved? Encryption?
-3. How should the authenticity be revised?
+1. userID := Argon2Key(password.bytes(), user_name.bytes(), 128)
+2. userUUID, _ := uuid.FromBytes(userID)
+3. sUser, a new signedUser structure.
+4. user, a new User structure.
+5. lockBlock := RandomBytes(128)
+6. privateKey := Argon2Key(password.bytes(), lockBlock, 128)
+7. - user.personalKey := Argon2Key(privateKey, RandomBytes(128), 128)
+   - user.fileUUIDs := map[string]UUID
+   - user.username := user_name
+
+8. signLock, verifyLock := DSKeyGen()
+    - user.signLock := signLock
+9. signUser, verifyUser := DSKeyGen() 
+    - user.signUser := signUser
+10. bUser, _ := json.Marshal(user)
+11. sUser.myLock := SymEnc(password.bytes(), RandomBytes(256), lockBlock)
+12. sUser.myUser := SymEnc(privateKey, RandomBytes(256), bUser)
+13. sUser.lockSign := DSSign(signLock, sUser.myLock)
+14. sUser.userSign := DSSign(signUser, sUser.myUser)
+15. KeystoreSet(user_name, verifyUser)
+16. KeystoreSet(user_name + 'lock', verifyLock)
+17. DatastoreSet(userUUID, SymEnc(password.bytes(), RandomBytes(128), json.Marshal(sUser)))
+18. Return &user
 ```
 
 **GetUser(username string, password string)**
 (userdataptr *User, err error)
 ```
-1. Shoud verify username, password authenticity
-2. Retrieve the user structure from permanent storage.
+1. Follow all steps of User Verification.
+2. return &RetrievedUser
 ```
 **StoreFile(filename string, data []byte)**
 ```
-1. Save file persistently in data store meeting security gurantees.
-2. Filename does NOT have enough entropy, different
-users should have no problems using same filename. 
+1. myUUID := uuid.New()
+2.  - fileKey := HMACEval(User.personalKey, filename)
+    - pageMsg := "PAGE" + filename
+    - pageKey, _ := HMACEval(fileKey, pageMsg)
+    - macsMsg := "MACS" + filename
+    - macsKey, _ := HMACEval(fileKey, macsMsg)
+3. myFile, a new ServerFile structure
+4. numPages := len(data) / page_size
+5. myFile.pages := make([][]bytes, 0, numPages)
+7. myFile.MACs := make([][]bytes, 0, numPages)
+8. for index from 0 to numPages - 1:
+    t0, t1 := index * page_size, (index + 1) * page_size
+    pagemsg := pageMsg + "index:" + str(index)
+    pagekey := HMACEval(pageKey, pagemsg)
+    page := SymEnc(pagekey, RandomBytes(128), data[t0:t1])
+    macKey := HMACEVal(macsKey, page)
+    append(myFile.pages[index], page)
+    append(myfile.macs[index], macKey)
+9. DatastoreSet(myUUID, SymEnc(fileKey, RandomBytes(128), myFile))
+10. User.fileUUIDs[filename] = myUUID
+11. User.update()
 ```
 **LoadFile(filename string) (data []byte, err error)**
 ```
