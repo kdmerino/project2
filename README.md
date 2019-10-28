@@ -26,12 +26,51 @@ users can share files with each other.
   changed a file, may return older versions.
 
 ### User Verification
-1. Determine UUID for encrypted user structure in server.
+1. Determine UUID for encrypted signed-user structure in Datastore server.
    Firstly, convert UName into a byte slice passed into `uuid.FromBytes`.
 2. Retrieve encrypted bytes from data store via UUID.
-3. Decrypt into user structure bytes using `SymDec` with `key=password`.
-4. Define variable to hold user structure, call `json.Unmarshal` on decrypted   bytes and defined variable.
-5. If error is nil then user has successfully been retrieved, else an error occurred. *Note:* Multiple trials are easily done by looping step 4. 
+3. Decrypt into bytes of signed-user structure using `SymDec`
+with *key* set to user password.
+1. Define variable to hold signed-user structure, call `json.Unmarshal` on decrypted bytes and defined variable.
+2. If error is nil, signed-user will contain User struct, userUUID, userSignature, a slice of bytes, sliceUUID, sliceSignature.
+   Run `DSVerify` and procede if no tampering has occurred on either object.
+3. Using `Aargon2Key` with user password, and the recovered slice of bytes create a 128 bit key.
+4. Decrypt into bytes of User structure using `SymDec` with *key* 
+as the 128 bit key just derived.
+5. Define variable to hold User struct, call `json.Unmarshal` on decrypted bytes and defined variable.
+6.  If error is nil, we have decrypted, verified interigity, and authenticity. 
+
+Notice we use a decrypt, signature check, and decrypt again 
+technique which protects the encrypted User via a signature and 
+the signature is protected via a secondary encryption
+containing both objects. Notice, we are resistant to tampering
+since the random byte block to generate the secondary key is 
+also protected via a signature.
+
+### File Retrieval 
+1. Determine UUID for encrypted file in Datastore server.
+   Firstly, grab SALT from the user's filemap. Append salt to filename in a byte slice. Deterministically compute UUID from bytes.
+2. Retrieve encrypted bytes from data store via UUID.
+3. The file's key is recovered from User's struct personal key hashing the SALT via `HMACEval`. Decrypt into bytes of (metafile struct.)
+4. Define variable to hold metafile structure, call
+`json.Unmarshal` on decrypted bytes and defined variable.
+5. If error is nil, metafile structure will contain an
+array of encrpyted pages (byte slices with fixed size) 
+and corresponding MAC's. We generate a correspoding,
+zeroeth key via `HMACEval` with 'Secret' + type encrypted
+via the already recovered key.
+All *i-th* keys will use the previous key, and a
+variation of the original message + it's index.
+6. Iterate over each page, verification is done by 
+obtaining `HMACEval` using its key and page. This is 
+checked against its corresponding mac via `HMACEqual`.
+7. Once verification is complete, decrypt all pages
+via `SymDec` using corresponding key.
+
+Notice, this technique allows us quickly append to a file
+by accessing the last page in a slice. After verification
+and encryption we may append ot this page. Thereby
+reducing our access time to a constant (page size).
 
 ### Functions
 **InitUser(username string, password string)**
