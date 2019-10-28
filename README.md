@@ -141,11 +141,20 @@ reducing our access time to a constant (page size).
 **AppendFile(filename string, data []byte) (err error)**
 ```
 1. Append data to the end of file (from filename).
+	- Retrieve last page and append recursively.
 2. Does not produce any file integrity checks.
+	- Write directly to the end page? How to seperate the encryption
+	from the last page to the next. Is it necessary? The key is the
+same in both files should be able to append.
+
 3. This method is required to be fast, it should not load
 all data on filename to append.
+	- A page is pulled not the entire file.
 4. Ensure the return of a file is the old version and never
 a mix of old + new content.
+	- Reduce the page size to bytes. Load to user struct once
+all data has been processed. 
+
 ```
 
 
