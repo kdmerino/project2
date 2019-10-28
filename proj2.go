@@ -123,7 +123,8 @@ func InitUser(username string, password string) (userdataptr *User, err error) {
 	userPass := []byte(password)
 
 	userKey := userlib.Argon2Key(userPass, []byte(username), 16)
-	userUUID := bytesToUUID(userKey)
+	userName := userlib.Argon2Key([]byte(username), userPass, 16)
+	userUUID := bytesToUUID(userName)
 	var sUser SignedUser
 	var user User
 
@@ -166,9 +167,7 @@ func GetUser(username string, password string) (userdataptr *User, err error) {
 	// +---------------------------+ My Code Below Here +---------------------------+
 	var userdata User
 	userdataptr = &userdata
-
 	return userdataptr, nil
-
 	// +---------------------------+ My Code Above Here +---------------------------+
 }
 
