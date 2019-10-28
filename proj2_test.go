@@ -36,6 +36,40 @@ func TestInit(t *testing.T) {
 	// You probably want many more tests here.
 }
 
+func TestGetUser(t *testing.T) {
+	t.Log("Getting a User test")
+	userlib.SetDebugStatus(true)
+	u, err := InitUser("kevin", "wasHere")
+	if err != nil {
+		t.Error("Failed to initialize user", err)
+		return
+	}
+	t.Log("Got User", u)
+	t.Log("Fetching User")
+	user, e := GetUser("kevin", "wasHere")
+	if e != nil {
+		t.Error("Failed to Fetch User", e)
+	}
+	// Matching fields?
+	if u.Username == user.Username {
+		t.Log("Username matched")
+		match := true
+		for i := 0; i < len(u.PersonalKey); i++ {
+			if u.PersonalKey[i] != user.PersonalKey[i] {
+				match = false
+				break
+			}
+		}
+		if match {
+			t.Log("Personal Key was a match")
+		} else {
+			t.Log("Personal Key was corrupted with out detection")
+		}
+	}
+	t.Log("Fetched ", user)
+
+}
+
 func TestStorage(t *testing.T) {
 	// And some more tests, because
 	u, err := GetUser("alice", "fubar")
