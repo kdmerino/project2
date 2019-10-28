@@ -121,9 +121,8 @@ type User struct {
 func InitUser(username string, password string) (userdataptr *User, err error) {
 	// +---------------------------+ My Code Below Here +---------------------------+
 	userPass := []byte(password)
-
 	userKey := userlib.Argon2Key(userPass, []byte(username), 16)
-	userName := userlib.Argon2Key([]byte(username), userPass, 16)
+	userName := userlib.Argon2Key(userKey, userPass, 16)
 	userUUID := bytesToUUID(userName)
 	var sUser SignedUser
 	var user User
@@ -165,9 +164,33 @@ func InitUser(username string, password string) (userdataptr *User, err error) {
 // data was corrupted, or if the user can't be found.
 func GetUser(username string, password string) (userdataptr *User, err error) {
 	// +---------------------------+ My Code Below Here +---------------------------+
-	var userdata User
-	userdataptr = &userdata
-	return userdataptr, nil
+	userPass := []byte(password)
+	userKey := userlib.Argon2Key(userPass, []byte(username), 16)
+	userName := userlib.Argon2Key(userKey, userPass, 16)
+	userUUID := bytesToUUID(userName)
+	var sUser SignedUser
+	var user User
+
+	// Grab Signed User from Datastore
+	beUser, found := userlib.DatastoreGet(userUUID)
+	if found {
+		dbUser := userlib.SymDec(userKey, beUser)
+		dErr := json.Unmarshal(dbUser, sUser)
+		if dErr == nil {
+			// Verify the integrity of User, and Lock
+			verifyUser, _ := userlib.KeystoreGet(username)
+			resultUser := userlib.DSVerify(verifyUser, sUser.MyUser, sUser.UserSign)
+			verifyLock, _ := userlib.KeystoreGet(username + "lock")
+			resultLock := userlib.DSVerify(verifyLock, sUser.MyLock, sUser.LockSign)
+
+			if resultUser == nil && resultLock == nil {
+				// pick up in here.
+			}
+
+		}
+		// else User was corrupted
+	}
+	// else User not found
 	// +---------------------------+ My Code Above Here +---------------------------+
 }
 
