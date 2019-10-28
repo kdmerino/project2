@@ -1,6 +1,6 @@
 # Project2
 ## CS161 | Project 2
-### Kevin Merino & Isabelle 
+### Kevin Merino & Isabele Daniels
 We want to design and implement a file sharing system (like Dropbox) that protects user privacy. In particular, user files are always *encrypted* and *authenticated* on the server. In addition,
 users can share files with each other.
 
