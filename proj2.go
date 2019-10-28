@@ -30,7 +30,6 @@ import (
 
 	// optional
 	_ "strconv"
-
 	// if you are looking for fmt, we don't give you fmt, but you can use userlib.DebugMsg
 	// see someUsefulThings() below
 )
@@ -64,7 +63,7 @@ func someUsefulThings() {
 	// And a random RSA key.  In this case, ignoring the error
 	// return value
 	var pk userlib.PKEEncKey
-        var sk userlib.PKEDecKey
+	var sk userlib.PKEDecKey
 	pk, sk, _ = userlib.PKEKeyGen()
 	userlib.DebugMsg("Key is %v, %v", pk, sk)
 }
@@ -78,9 +77,26 @@ func bytesToUUID(data []byte) (ret uuid.UUID) {
 	return
 }
 
+// +---------------------------+ My Code Below Here +---------------------------+
+// Wrapper Structures, hold signatures.
+type SignedUser struct {
+	MyUser   []byte // Inner Encrypted User
+	MyLock   []byte // Block of Ramdom Data for inner key.
+	LockSign []byte // Lock Signature
+	UserSign []byte // User Signature
+}
+
+// +---------------------------+ My Code Above Here +---------------------------+
+
 // The structure definition for a user record
 type User struct {
 	Username string
+	// +---------------------------+ My Code Below Here +---------------------------+
+	SignKeyLock userlib.DSSignKey    // Signature key for Outter block
+	SignKeyUser userlib.DSSignKey    // Signature key for User
+	PersonalKey []byte               // Unique Key for this user's purposes.
+	fileUUIDs   map[string]uuid.UUID // Map of User's file UUIDs
+	// +---------------------------+ My Code Above Here +---------------------------+
 
 	// You can add other fields here if you want...
 	// Note for JSON to marshal/unmarshal, the fields need to
@@ -103,20 +119,53 @@ type User struct {
 
 // You can assume the user has a STRONG password
 func InitUser(username string, password string) (userdataptr *User, err error) {
-	var userdata User
-	userdataptr = &userdata
+	// +---------------------------+ My Code Below Here +---------------------------+
+	userKey := []byte(password)
+	userID := userlib.Argon2Key(userKey, []byte(username), 128)
+	userUUID := bytesToUUID(userID)
+	var sUser SignedUser
+	var user User
+	signLock, verifyLock, _ := userlib.DSKeyGen()
+	signUser, verifyUser, _ := userlib.DSKeyGen()
+	lockBlock := userlib.RandomBytes(128)
+	privateKey := userlib.Argon2Key(userKey, lockBlock, 128)
 
-	return &userdata, nil
+	// Fill in User fields
+	user.Username = username
+	user.SignKeyLock = signLock
+	user.SignKeyUser = signUser
+	user.PersonalKey = privateKey
+	user.fileUUIDs = make(map[string]uuid.UUID)
+
+	// Encrypt
+	bUser, _ := json.Marshal(user)
+	sUser.MyUser = userlib.SymEnc(privateKey, userlib.RandomBytes(128), bUser)
+	sUser.MyLock = userlib.SymEnc(userKey, userlib.RandomBytes(128), lockBlock)
+	sUser.LockSign, _ = userlib.DSSign(signLock, sUser.MyLock)
+	sUser.UserSign, _ = userlib.DSSign(signUser, sUser.MyUser)
+	userlib.KeystoreSet(username, verifyUser)
+	userlib.KeystoreSet(username+"lock", verifyLock)
+	bsUser, _ := json.Marshal(sUser)
+	encryptUser := userlib.SymEnc(userKey, userlib.RandomBytes(128), bsUser)
+	userlib.DatastoreSet(userUUID, encryptUser)
+
+	// Ignore error handling for now
+	userdataptr = &user
+	return userdataptr, nil
+	// +---------------------------+ My Code Above Here +---------------------------+
 }
 
 // This fetches the user information from the Datastore.  It should
 // fail with an error if the user/password is invalid, or if the user
 // data was corrupted, or if the user can't be found.
 func GetUser(username string, password string) (userdataptr *User, err error) {
+	// +---------------------------+ My Code Below Here +---------------------------+
 	var userdata User
 	userdataptr = &userdata
 
 	return userdataptr, nil
+
+	// +---------------------------+ My Code Above Here +---------------------------+
 }
 
 // This stores a file in the datastore.

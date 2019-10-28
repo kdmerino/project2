@@ -4,17 +4,17 @@ package proj2
 // imports it will break the autograder, and we will be Very Upset.
 
 import (
-	"testing"
-	"reflect"
-	"github.com/cs161-staff/userlib"
-	_ "encoding/json"
 	_ "encoding/hex"
-	_ "github.com/google/uuid"
-	_ "strings"
+	_ "encoding/json"
 	_ "errors"
+	"reflect"
 	_ "strconv"
-)
+	_ "strings"
+	"testing"
 
+	"github.com/cs161-staff/userlib"
+	_ "github.com/google/uuid"
+)
 
 func TestInit(t *testing.T) {
 	t.Log("Initialization test")
@@ -36,7 +36,6 @@ func TestInit(t *testing.T) {
 	// You probably want many more tests here.
 }
 
-
 func TestStorage(t *testing.T) {
 	// And some more tests, because
 	u, err := GetUser("alice", "fubar")
@@ -48,7 +47,6 @@ func TestStorage(t *testing.T) {
 
 	v := []byte("This is a test")
 	u.StoreFile("file1", v)
-
 
 	v2, err2 := u.LoadFile("file1")
 	if err2 != nil {
