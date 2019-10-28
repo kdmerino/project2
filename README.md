@@ -25,6 +25,15 @@ users can share files with each other.
 - The user can detect if server
   changed a file, may return older versions.
 
+### User Verification
+1. Determine UUID for encrypted user structure in server.
+   Firstly, convert UName into a byte slice passed into `uuid.FromBytes`.
+2. Retrieve encrypted bytes from data store via UUID.
+3. Decrypt into user structure bytes using `SymDec` with `key=password`.
+4. Define variable to hold user structure, call `json.Unmarshal` on decrypted   bytes and defined variable.
+5. If error is nil then user has successfully been retrieved, else an error occurred. *Note:* Multiple trials are easily done by looping step 4. 
+
+### Functions
 **InitUser(username string, password string)**
 (userdataptr *User, err error)
 ```
@@ -59,3 +68,7 @@ all data on filename to append.
 4. Ensure the return of a file is the old version and never
 a mix of old + new content.
 ```
+
+
+   
+
