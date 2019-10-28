@@ -120,15 +120,17 @@ type User struct {
 // You can assume the user has a STRONG password
 func InitUser(username string, password string) (userdataptr *User, err error) {
 	// +---------------------------+ My Code Below Here +---------------------------+
-	userKey := []byte(password)
-	userID := userlib.Argon2Key(userKey, []byte(username), 128)
-	userUUID := bytesToUUID(userID)
+	userPass := []byte(password)
+
+	userKey := userlib.Argon2Key(userPass, []byte(username), 16)
+	userUUID := bytesToUUID(userKey)
 	var sUser SignedUser
 	var user User
+
 	signLock, verifyLock, _ := userlib.DSKeyGen()
 	signUser, verifyUser, _ := userlib.DSKeyGen()
-	lockBlock := userlib.RandomBytes(128)
-	privateKey := userlib.Argon2Key(userKey, lockBlock, 128)
+	lockBlock := userlib.RandomBytes(16)
+	privateKey := userlib.Argon2Key(userPass, lockBlock, 16)
 
 	// Fill in User fields
 	user.Username = username
@@ -139,14 +141,16 @@ func InitUser(username string, password string) (userdataptr *User, err error) {
 
 	// Encrypt
 	bUser, _ := json.Marshal(user)
-	sUser.MyUser = userlib.SymEnc(privateKey, userlib.RandomBytes(128), bUser)
-	sUser.MyLock = userlib.SymEnc(userKey, userlib.RandomBytes(128), lockBlock)
+	sUser.MyUser = userlib.SymEnc(privateKey, userlib.RandomBytes(16), bUser)
+	sUser.MyLock = userlib.SymEnc(userKey, userlib.RandomBytes(16), lockBlock)
 	sUser.LockSign, _ = userlib.DSSign(signLock, sUser.MyLock)
 	sUser.UserSign, _ = userlib.DSSign(signUser, sUser.MyUser)
+
 	userlib.KeystoreSet(username, verifyUser)
 	userlib.KeystoreSet(username+"lock", verifyLock)
+
 	bsUser, _ := json.Marshal(sUser)
-	encryptUser := userlib.SymEnc(userKey, userlib.RandomBytes(128), bsUser)
+	encryptUser := userlib.SymEnc(userKey, userlib.RandomBytes(16), bsUser)
 	userlib.DatastoreSet(userUUID, encryptUser)
 
 	// Ignore error handling for now
