@@ -50,29 +50,8 @@ since the random byte block to generate the secondary key is
 also protected via a signature.
 
 ### File Retrieval 
-1. Determine UUID for encrypted file in Datastore server.
-   Firstly, grab SALT from the user's filemap. Append salt to filename in a byte slice. Deterministically compute UUID from bytes.
-2. Retrieve encrypted bytes from data store via UUID.
-3. The file's key is recovered from User's struct personal key hashing the SALT via `HMACEval`. Decrypt into bytes of (metafile struct.)
-4. Define variable to hold metafile structure, call
-`json.Unmarshal` on decrypted bytes and defined variable.
-5. If error is nil, metafile structure will contain an
-array of encrpyted pages (byte slices with fixed size) 
-and corresponding MAC's. We generate a correspoding,
-zeroeth key via `HMACEval` with 'Secret' + type encrypted
-via the already recovered key.
-All *i-th* keys will use the previous key, and a
-variation of the original message + it's index.
-6. Iterate over each page, verification is done by 
-obtaining `HMACEval` using its key and page. This is 
-checked against its corresponding mac via `HMACEqual`.
-7. Once verification is complete, decrypt all pages
-via `SymDec` using corresponding key.
+1. 
 
-Notice, this technique allows us quickly append to a file
-by accessing the last page in a slice. After verification
-and encryption we may append ot this page. Thereby
-reducing our access time to a constant (page size).
 
 ### Functions
 **InitUser(username string, password string)**
@@ -111,27 +90,7 @@ reducing our access time to a constant (page size).
 ```
 **StoreFile(filename string, data []byte)**
 ```
-1. myUUID := uuid.New()
-2.  - fileKey := HMACEval(User.personalKey, filename)
-    - pageMsg := "PAGE" + filename
-    - pageKey, _ := HMACEval(fileKey, pageMsg)
-    - macsMsg := "MACS" + filename
-    - macsKey, _ := HMACEval(fileKey, macsMsg)
-3. myFile, a new ServerFile structure
-4. numPages := len(data) / page_size
-5. myFile.pages := make([][]bytes, 0, numPages)
-7. myFile.MACs := make([][]bytes, 0, numPages)
-8. for index from 0 to numPages - 1:
-    t0, t1 := index * page_size, (index + 1) * page_size
-    pagemsg := pageMsg + "index:" + str(index)
-    pagekey := HMACEval(pageKey, pagemsg)
-    page := SymEnc(pagekey, RandomBytes(128), data[t0:t1])
-    macKey := HMACEVal(macsKey, page)
-    append(myFile.pages[index], page)
-    append(myfile.macs[index], macKey)
-9. DatastoreSet(myUUID, SymEnc(fileKey, RandomBytes(128), myFile))
-10. User.fileUUIDs[filename] = myUUID
-11. User.update()
+1. 
 ```
 **LoadFile(filename string) (data []byte, err error)**
 ```

@@ -36,6 +36,7 @@ func TestInit(t *testing.T) {
 	// You probably want many more tests here.
 }
 
+// +---------------------------+ My Code Below Here +---------------------------+
 func TestGetUser(t *testing.T) {
 	t.Log("Getting a User test")
 	userlib.SetDebugStatus(true)
@@ -69,6 +70,23 @@ func TestGetUser(t *testing.T) {
 	t.Log("Fetched ", user)
 
 }
+
+func TestStoreFile(t *testing.T) {
+	t.Log("Initializing Temporary User")
+	u, err := InitUser("Kevin", "Deeznuts")
+	if err == nil {
+		t.Log("Grabbed user", u)
+		u.StoreFile("file1", []byte("Testing File 1"))
+		uname := u.FileUUIDs["file1"]
+		data, found := userlib.DatastoreGet(uname)
+		if found {
+			t.Log("Found Master file in Datastore", data)
+		}
+
+	}
+}
+
+// +---------------------------+ My Code Above Here +---------------------------+
 
 func TestStorage(t *testing.T) {
 	// And some more tests, because
