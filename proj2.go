@@ -152,8 +152,10 @@ type User struct {
 // +---------------------------+ My Code Below Here +---------------------------+
 
 // CommitUser heler method to Encrypt and Commit User to memory.
-func CommitUser(userptr *User, block []byte, outerKey []byte, innerKey []byte) {
+func CommitUser(userptr *User, block []byte) {
 	var sUser SignedUser
+	outerKey := userptr.UpdateKey
+	innerKey := userlib.Argon2Key(outerKey, block, 16)
 	// Encrypt
 	bUser, _ := json.Marshal(userptr)
 	sUser.MyUser = userlib.SymEnc(innerKey, userlib.RandomBytes(16), bUser)
@@ -164,6 +166,48 @@ func CommitUser(userptr *User, block []byte, outerKey []byte, innerKey []byte) {
 	bsUser, _ := json.Marshal(sUser)
 	encryptUser := userlib.SymEnc(outerKey, userlib.RandomBytes(16), bsUser)
 	userlib.DatastoreSet(userptr.Address, encryptUser)
+}
+
+// PullUser helper method to Pull and Decrypt + Verify a User from memory.
+func PullUser(userUUID uuid.UUID, username string, outerKey []byte) (data []byte, err error) {
+	var sUser SignedUser
+	// Pull User
+	BEUser, found := userlib.DatastoreGet(userUUID)
+	if found {
+		BUser := userlib.SymDec(outerKey, BEUser)
+		err = json.Unmarshal(BUser, &sUser)
+		if err == nil {
+			// Verify the integrity of User, and Lock
+			verify, ok := userlib.KeystoreGet("sg:" + username)
+			if ok {
+				lockErr := userlib.DSVerify(verify, sUser.MyLock, sUser.LockSign)
+				userErr := userlib.DSVerify(verify, sUser.MyUser, sUser.UserSign)
+				if lockErr == nil && userErr == nil {
+					block := userlib.SymDec(outerKey, sUser.MyLock)
+					innerKey := userlib.Argon2Key(outerKey, block, 16)
+					data := userlib.SymDec(innerKey, sUser.MyUser)
+					err = nil
+					return data, err
+				}
+				data = nil
+				if lockErr == nil {
+					err = userErr
+				} else {
+					err = lockErr
+				}
+			} else {
+				data = nil
+				err = errors.New("User cannot be verified")
+			}
+		} else {
+			data = nil
+			err = errors.New("Failed to decrypt user")
+		}
+	} else {
+		data = nil
+		err = errors.New("User Not found")
+	}
+	return data, err
 }
 
 // CommitFile helper method to Encrypt and Commit a File to memory.
@@ -192,7 +236,7 @@ func PullFile(fileUUID uuid.UUID, fileKey []byte, macKey []byte) (data []byte, o
 			if userlib.HMACEqual(MACFile, signed.MACData) {
 				// Decrypt Inner data
 				data = userlib.SymDec(fileKey, signed.ENCData)
-				return
+				return data, ok
 			}
 		}
 	}
@@ -212,7 +256,40 @@ func Authorized(master *FileMaster, username string, key []byte) bool {
 	return rights.Valid
 }
 
-// +---------------------------+ My Code Below Here +---------------------------+
+// AuthorizedV helper method to debug Authorized
+func AuthorizedV(master *FileMaster, username string, key []byte) (magic []byte, ok bool, err error) {
+	BPerm, err := userlib.HMACEval(key, []byte(username))
+	perm := string(BPerm)
+	var rights Permission
+	msg := ""
+	if master.Authorize == nil {
+		msg = ("Master Authorization is nil")
+	}
+	for rights = master.Authorize[perm]; !rights.Root; rights = master.Authorize[rights.Ref] {
+		msg += "master.Authorize[" + perm + "] = "
+		if rights.Valid {
+			msg += "{valid:True"
+		} else {
+			msg += "{valid:False"
+		}
+		if rights.Root {
+			msg += ", root:True,"
+		} else {
+			msg += ", root:False,"
+		}
+		msg += ", Ref:" + rights.Ref + "}"
+		if !rights.Valid {
+			break
+		}
+
+	}
+	if !rights.Valid {
+		err = errors.New(msg)
+	}
+	return BPerm, rights.Valid, err
+}
+
+// +---------------------------+ My Code Above Here +---------------------------+
 
 func InitUser(username string, password string) (userdataptr *User, err error) {
 	// +---------------------------+ My Code Below Here +---------------------------+
@@ -224,13 +301,12 @@ func InitUser(username string, password string) (userdataptr *User, err error) {
 
 	signUser, verifyUser, _ := userlib.DSKeyGen()
 	lockBlock := userlib.RandomBytes(16)
-	privateKey := userlib.Argon2Key(userKey, lockBlock, 16)
 	var public userlib.PKEEncKey // RSA for file Sharing
 
 	// Fill in User fields
 	user.Username = username
 	user.Signature = signUser
-	user.PersonalKey = userlib.Argon2Key(privateKey, userlib.RandomBytes(16), 16)
+	user.PersonalKey = userlib.Argon2Key(userlib.RandomBytes(16), userlib.RandomBytes(16), 16)
 	public, user.RSAKey, _ = userlib.PKEKeyGen()
 	user.UpdateKey = userKey
 	user.FileUUIDs = nil
@@ -240,7 +316,7 @@ func InitUser(username string, password string) (userdataptr *User, err error) {
 	// Post
 	userlib.KeystoreSet("fs:"+username, public)
 	userlib.KeystoreSet("sg:"+username, verifyUser)
-	CommitUser(&user, lockBlock, userKey, privateKey)
+	CommitUser(&user, lockBlock)
 
 	// Ignore error handling for now
 	userdataptr = &user
@@ -257,42 +333,17 @@ func GetUser(username string, password string) (userdataptr *User, err error) {
 	userKey := userlib.Argon2Key(userPass, []byte(username), 16)
 	userName := userlib.Argon2Key(userKey, []byte(username), 16)
 	userUUID := bytesToUUID(userName)
-	var sUser SignedUser
 	var user User
 
 	// Grab Signed User from Datastore
-	BEUser, found := userlib.DatastoreGet(userUUID)
-	if found {
-		BUser := userlib.SymDec(userKey, BEUser)
-		err = json.Unmarshal(BUser, &sUser)
-		if err == nil {
-			// Verify the integrity of User, and Lock
-			verify, _ := userlib.KeystoreGet("sg:" + username)
-			resultUser := userlib.DSVerify(verify, sUser.MyUser, sUser.UserSign)
-			resultLock := userlib.DSVerify(verify, sUser.MyLock, sUser.LockSign)
-			if resultUser == nil && resultLock == nil {
-				lockBlock := userlib.SymDec(userKey, sUser.MyLock)
-				privateKey := userlib.Argon2Key(userPass, lockBlock, 16)
-				BUser := userlib.SymDec(privateKey, sUser.MyUser)
-				err = json.Unmarshal(BUser, &user)
-				userdataptr = &user
-			} else {
-				if resultUser == nil {
-					err = resultUser
-				} else {
-					err = resultLock
-				}
-			}
-			// else User was corrupted
-		} else {
-			err = errors.New("User Not found")
-			userdataptr = nil
-		}
-	} else {
-		err = errors.New("User Not found")
-		userdataptr = nil
+	BUser, err := PullUser(userUUID, username, userKey)
+	if err == nil {
+		err = json.Unmarshal(BUser, &user)
+		userdataptr = &user
+		return userdataptr, err
+
 	}
-	return userdataptr, err
+	return nil, err
 	// +---------------------------+ My Code Above Here +---------------------------+
 }
 
@@ -340,8 +391,7 @@ func (userdata *User) StoreFile(filename string, data []byte) {
 
 	// Commit User data
 	LockBlock := userlib.RandomBytes(16)
-	privateKey := userlib.Argon2Key(userdata.UpdateKey, LockBlock, 16)
-	CommitUser(userdata, LockBlock, userdata.UpdateKey, privateKey)
+	CommitUser(userdata, LockBlock)
 
 	// +---------------------------+ My Code Above Here +---------------------------+
 }
@@ -572,8 +622,7 @@ func (userdata *User) ReceiveFile(filename string, sender string,
 	userdata.FileUUIDs[filename] = pack.FileUUID
 	// Commit User data
 	LockBlock := userlib.RandomBytes(16)
-	privateKey := userlib.Argon2Key(userdata.UpdateKey, LockBlock, 16)
-	CommitUser(userdata, LockBlock, userdata.UpdateKey, privateKey)
+	CommitUser(userdata, LockBlock)
 
 	return nil // No error was detected
 	// +---------------------------+ My Code Above Here +---------------------------+
