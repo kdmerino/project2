@@ -289,6 +289,7 @@ func TestMethodFile(t *testing.T) {
 	t.Log("Retrieved User")
 	t.Log("Checking User Parameters")
 	user, err = GetUser(username, userpass)
+
 	if err != nil {
 		t.Error("User retrieval failure", err)
 	}
@@ -326,6 +327,13 @@ func TestMethodFile(t *testing.T) {
 	var RetFile FileMaster
 	var myFile []byte
 	err = json.Unmarshal(data, &RetFile)
+	t.Log("Diving into table")
+	t.Log("Key expected: ", magic)
+	for key, val := range RetFile.Authorize {
+		t.Log("Magic held:", []byte(key))
+		t.Log("Permi held:", val)
+	}
+
 	if err == nil {
 		t.Log("File Master retrieved")
 		t.Log("Verifying user permissions")
