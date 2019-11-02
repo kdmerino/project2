@@ -706,7 +706,6 @@ func TestOtherAccess(t *testing.T) {
 	}
 }
 
-/*
 // Test to see if live updates occur
 func TestMultiAccess(t *testing.T) {
 	// Initialize Users, (A, B, C, D)
@@ -733,20 +732,20 @@ func TestMultiAccess(t *testing.T) {
 	if err != nil {
 		t.Error("error", err)
 	}
-	magicC, err := A.ShareFile("fileA", "userC")
+	magicC, err := A.ShareFile("fileA", "UserC")
 	if err != nil {
 		t.Error("error", err)
 	}
-	magicD, err := A.ShareFile("fileA", "userD")
+	magicD, err := A.ShareFile("fileA", "UserD")
 	if err != nil {
 		t.Error("error", err)
 	}
 	// User B<- Receives 'fileA' from A
-	B.ReceiveFile("fileAB", "userA", magicB)
+	B.ReceiveFile("fileAB", "UserA", magicB)
 	// User C<- Receives 'fileA' from A
-	C.ReceiveFile("fileAC", "userA", magicC)
+	C.ReceiveFile("fileAC", "UserA", magicC)
 	// User D<- Receives 'fileB' from A
-	D.ReceiveFile("fileAD", "userA", magicD)
+	D.ReceiveFile("fileAD", "UserA", magicD)
 	// For all users [i]:
 	Users := []*User{A, B, C, D}
 	Files := []string{"fileA", "fileAB", "fileAC", "fileAD"}
@@ -777,14 +776,17 @@ func TestSharingShares(t *testing.T) {
 	A, err := GetUser("userA", "passA")
 	if err != nil {
 		t.Error("error", err)
+		return
 	}
 	B, err := GetUser("userB", "passB")
 	if err != nil {
 		t.Error("error", err)
+		return
 	}
-	C, err := GetUser("userC", "passC")
+	C, err := InitUser("userC", "passC")
 	if err != nil {
 		t.Error("error", err)
+		return
 	}
 	// User A<- Creates a file, 'mutual'
 	mutual := []byte("-- This is mutual --")
@@ -809,19 +811,26 @@ func TestSharingShares(t *testing.T) {
 	}
 }
 
-/*
 // Test to see if a revoked user can access updates.
 func TestRevokeUpdates(t *testing.T) {
 	// Load Users, (A, C)
 	A, err := GetUser("userA", "passA")
+	if err != nil {
+		t.Error("error", err)
+		return
+	}
 	C, err := GetUser("userC", "passC")
+	if err != nil {
+		t.Error("error", err)
+		return
+	}
 	// User A Revokes access to C
 	err = A.RevokeFile("mutual", "userC")
 	A.AppendFile("mutual", []byte("-A was here"))
-	latest, err := A.LoadFile("mutual")
+	_, err = A.LoadFile("mutual")
 	err = A.RevokeFile("mutual", "userC")
 	// Ensure C does not see update.
-	update, err := C.LoadFile("mutual")
+	_, err = C.LoadFile("mutual")
 	if err == nil {
 		t.Error("Update was not prevented")
 	}
@@ -831,20 +840,54 @@ func TestRevokeUpdates(t *testing.T) {
 func TestRevokeFriends(t *testing.T) {
 	// Load Users, (A, B, C)
 	A, err := GetUser("userA", "passA")
+	if err != nil {
+		t.Error("error", err)
+		return
+	}
 	B, err := GetUser("userB", "passB")
+	if err != nil {
+		t.Error("error", err)
+		return
+	}
 	C, err := GetUser("userC", "passC")
+	if err != nil {
+		t.Error("error", err)
+		return
+	}
 	// User B invites C
 	magic, err := B.ShareFile("mutual", "userC")
 	err = C.ReceiveFile("mutual", "userB", magic)
+	// User A revokes B and consequently everyon
+	err = A.RevokeFile("mutual", "userB")
+	// Test C's access
+	_, err = C.LoadFile("mutual")
+	if err == nil {
+		t.Error("C was not banned")
+	}
+	_, err = B.LoadFile("mutual")
+	if err == nil {
+		t.Error("B was not banned")
+	}
 }
-
 
 // Test to see if a different user can use a magicstring.
 func TestNotMyMagic(t *testing.T) {
 	// Create Users, (x, Y, Z)
 	X, err := InitUser("userX", "passX")
+	if err != nil {
+		t.Error("error", err)
+		return
+	}
 	Y, err := InitUser("userY", "passY")
+	if err != nil {
+		t.Error("error", err)
+		return
+	}
 	Z, err := InitUser("userZ", "passZ")
+	if err != nil {
+		t.Error("error", err)
+		return
+	}
 	// User X creates a file
 	fileX := []byte("This is file X")
 	X.StoreFile("fileX", fileX)
@@ -852,12 +895,23 @@ func TestNotMyMagic(t *testing.T) {
 	// User Z snoops magic_string and attempts
 	// - 1. Pre Snoop
 	err = Z.ReceiveFile("fileX", "userX", magic)
+	if err == nil {
+		t.Error("Z Pre-snooped the file")
+	}
 	// User Y receives file from X
 	err = Y.ReceiveFile("fileX", "userX", magic)
+	if err != nil {
+		t.Error("error", err)
+		return
+	}
 	// - 2. Post Snoop
 	err = Z.ReceiveFile("fileX", "userX", magic)
+	if err == nil {
+		t.Error("Z Post-snooped the file")
+	}
 }
 
+/*
 // Test to see if multiple user's can update the same file.
 func TestMultiUpdates(t *testing.T) {
 	// Load Users, (A, B, C)
