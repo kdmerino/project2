@@ -211,7 +211,7 @@ func TestMethodFile(t *testing.T) {
 	var user *User
 	var err error
 	t.Log("Creating a User")
-	username := "TestUser"
+	username := "TestUser2"
 	userpass := "123Password"
 	user, err = InitUser(username, userpass)
 	if err != nil {
@@ -252,13 +252,14 @@ func TestMethodFile(t *testing.T) {
 	// Buid Master File
 	master.UIDBlocks = make([]uuid.UUID, 1)
 	master.UIDBlocks[0] = headUUID
-	magic, _ := userlib.HMACEval(macKey, []byte(userdata.Username))
+	magic := string(userlib.RandomBytes(16))
 	rights.Valid = true
 	rights.Root = true
 	if master.Authorize == nil {
 		master.Authorize = make(map[string]Permission)
 	}
-	master.Authorize[string(magic)] = rights // rights.Ref = nil
+	t.Log("Using Key: ", []byte(magic))
+	master.Authorize[magic] = rights // rights.Ref = nil
 	t.Log("Giving user permission: ", rights)
 
 	// Encrypt Master + Commit
@@ -277,8 +278,10 @@ func TestMethodFile(t *testing.T) {
 	if userdata.FileUUIDs == nil {
 		userdata.FileUUIDs = make(map[string]uuid.UUID)
 		userdata.FileKeys = make(map[string][]byte)
+		userdata.FilePerms = make(map[string]string)
 	}
 	userdata.FileUUIDs[filename] = fileUUID
+	userdata.FilePerms[filename] = magic
 	userdata.FileKeys[filename] = fileKey
 
 	// Commit User data
@@ -328,7 +331,7 @@ func TestMethodFile(t *testing.T) {
 	var myFile []byte
 	err = json.Unmarshal(data, &RetFile)
 	t.Log("Diving into table")
-	t.Log("Key expected: ", magic)
+	t.Log("Key expected: ", []byte(user.FilePerms[filename]))
 	for key, val := range RetFile.Authorize {
 		t.Log("Magic held:", []byte(key))
 		t.Log("Permi held:", val)
@@ -339,9 +342,7 @@ func TestMethodFile(t *testing.T) {
 		t.Log("Verifying user permissions")
 		// Simulating Authorize(master, username, key)
 		t.Log("Starting Deep Test | Authorize")
-		key := macKey
-		BPerm, _ := userlib.HMACEval(key, []byte(username))
-		perm := string(BPerm)
+		perm := user.FilePerms[filename]
 		var rights Permission
 		for rights = RetFile.Authorize[perm]; !rights.Root; rights = RetFile.Authorize[rights.Ref] {
 			t.Log("Current rights:", rights)
@@ -407,22 +408,6 @@ func TestMethodFile(t *testing.T) {
 	// Deterministic MAC
 	MacKey, _ := userlib.HMACEval(FileKey, []byte("file-mac-key"))
 	MacKey = MacKey[:16]
-	if len(macKey) == len(MacKey) {
-		t.Log("Ensuring MAC Key is persistent")
-		mismatch := false
-		for i := 0; i < len(macKey); i++ {
-			if MacKey[i] != macKey[i] {
-				mismatch = true
-			}
-		}
-		if !mismatch {
-			t.Log("Key's are persistent")
-		} else {
-			t.Log("MAC Key is corrupted")
-		}
-	} else {
-		t.Log("Keys do not length match")
-	}
 
 	// Encrypt Data
 	CommitFile(HeadUUID, data, FileKey, MacKey)
@@ -437,84 +422,108 @@ func TestMethodFile(t *testing.T) {
 		t.Error("File has been damaged", err)
 	}
 	// Enforce Permission policy
-	t.Log("Starting Deep Test | Authorized")
-	// Simulating Call: Authorized(&Master, MyUser.Username, MacKey)
-	_, Ok, Err := AuthorizedV(&Master, MyUser.Username, MacKey)
-	t.Log("Master["+string(magic)+"]=", Master.Authorize[string(magic)])
-	if !Ok {
-		t.Error("User is NOT authorized", Err)
+	t.Log("Starting Deep Test | Authorize")
+	MyPerm := MyUser.FilePerms[filename]
+	var Rights Permission
+	for Rights = Master.Authorize[MyPerm]; !Rights.Root; Rights = Master.Authorize[Rights.Ref] {
+		t.Log("Current rights:", Rights)
+		if !Rights.Valid {
+			break
+		}
 	}
-	t.Log("Ending Deep Test | Authorized")
+	t.Log("Ending Deep Test | Authorize")
+	if Rights.Valid {
+		t.Log("User was authorized")
+	} else {
+		t.Error("User is not authorized")
+		return
+	}
 	// Update Master
 	Master.UIDBlocks = append(Master.UIDBlocks, HeadUUID)
 
 	// Encrypt and Re-UpLoad
-	BMaster, err = json.Marshal(Master)
-	if err != nil {
-		t.Error("Marshal error", err)
-	}
+	BMaster, _ = json.Marshal(Master)
 	CommitFile(FileUUID, BMaster, FileKey, MacKey)
 	t.Log("Ending Deep Test | AppendFile")
+	t.Log("Starting Deep Test | LoadFile")
+	var Bmaster, MyFile []byte
+	var newMaster FileMaster
+	// Grab Master File once again.
+	Bmaster, ok = PullFile(FileUUID, FileKey, MacKey)
+	if !ok {
+		t.Error("File was lost")
+	}
+	err = json.Unmarshal(Bmaster, &newMaster)
+	if err != nil {
+		t.Error("File has been damaged", err)
+	}
+	// Enforce Permission policy
+	t.Log("Starting Deep Test | Authorize")
+	for Rights = Master.Authorize[MyPerm]; !Rights.Root; Rights = Master.Authorize[Rights.Ref] {
+		t.Log("Current rights:", Rights)
+		if !Rights.Valid {
+			break
+		}
+	}
+	t.Log("Ending Deep Test | Authorize")
+	if Rights.Valid {
+		t.Log("User was authorized")
+	} else {
+		t.Error("User is not authorized")
+		return
+	}
+	// User is Authorized, Load Data and perform all checks
+	for _, v := range newMaster.UIDBlocks {
+		var header SignedFile
+		// Fetch Block of data and Decrypt
+		BEHead, found := userlib.DatastoreGet(v)
+		if !found {
+			err = errors.New("File is corrupted")
+			return
+		}
+		// Securiy checks for this block
+		BHead := userlib.SymDec(FileKey, BEHead)
+		err = json.Unmarshal(BHead, &header)
+		if err != nil {
+			return
+		}
+		DataMac, _ := userlib.HMACEval(macKey, header.ENCData)
+		if !userlib.HMACEqual(DataMac, header.MACData) {
+			err = errors.New("File has been tampered with")
+			return
+		}
+		// Append Decrypted Data Block
+		BData := userlib.SymDec(FileKey, header.ENCData)
+		for _, b := range BData {
+			MyFile = append(MyFile, b)
+		}
+	}
+
+	t.Log("--File Updated--")
+	t.Log(">> ", string(MyFile))
+	t.Log("Ending Deep Test | LoadFile")
 }
 
 func TestStoreFile(t *testing.T) {
-	t.Log("Initializing Temporary User")
-	u, err := InitUser("Kevin", "Deeznuts")
-	if err == nil {
-		t.Log("Grabbed user", u)
-		v := []byte("This is a test.")
+	// And some more tests, because
+	u, err := GetUser("alice", "fubar")
+	if err != nil {
+		t.Error("Failed to build user", err)
+		return
+	}
+	t.Log("Loaded user", u)
 
-		u.StoreFile("file1", v)
-		uname := u.FileUUIDs["file1"]
-		_, found := userlib.DatastoreGet(uname)
-		if !found {
-			t.Log("DID NOT find Master file in Datastore")
-		}
-		fileKey := u.FileKeys["file1"]
-		t.Log("File key found: ", fileKey)
-		macKey, _ := userlib.HMACEval(fileKey, []byte("file-mac-key"))
-		macKey = macKey[:16]
+	v := []byte("This is a test")
+	u.StoreFile("file1", v)
 
-		// plain, myErr := PullFile(uname, fileKey, macKey)
-		// Deep test: PullFile
-		t.Log("Start of deep test...")
-		var data []byte
-		var ok bool
-		fileUUID := uname
-
-		var signed SignedFile
-		data, ok = userlib.DatastoreGet(fileUUID)
-		if ok {
-			t.Log("Found signed user")
-			data = userlib.SymDec(fileKey, data)
-			err := json.Unmarshal(data, &signed)
-			if err == nil {
-				t.Log("User file has been decrypted")
-				// Integrity and Authenticity
-				MACFile, _ := userlib.HMACEval(macKey, signed.ENCData)
-				if userlib.HMACEqual(MACFile, signed.MACData) {
-					// Decrypt Inner data
-					data = userlib.SymDec(fileKey, signed.ENCData)
-					t.Log("User was decrypted successfully")
-				} else {
-					t.Log("Integrity of the file cannot be tested")
-				}
-			} else {
-				t.Log("File could not be recovered")
-			}
-		} else {
-			t.Log("File cannot be found")
-		}
-		plain := data
-		t.Log("End of deep test...")
-		// End of Deep test
-
-		var file FileMaster
-		err = json.Unmarshal(plain, &file)
-
-		magic, _ := userlib.HMACEval(macKey, []byte(u.Username))
-		myPerm := file.Authorize[string(magic)]
-		t.Log("Permissions found: ", myPerm)
+	v2, err2 := u.LoadFile("file1")
+	if err2 != nil {
+		t.Error("Failed to upload and download", err2)
+		return
+	}
+	if !reflect.DeepEqual(v, v2) {
+		t.Error("Downloaded file is not the same", v, v2)
+		return
 	}
 }
 
