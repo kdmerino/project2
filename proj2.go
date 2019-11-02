@@ -126,7 +126,6 @@ type User struct {
 	Address     uuid.UUID            // UUID of self
 	FileUUIDs   map[string]uuid.UUID // Map of User's files from filename to UUID
 	FileKeys    map[string][]byte    // Map of User's files from filename to key
-	FilePerms   map[string]string    // Map of User's files form filename to fileID
 	// +---------------------------+ My Code Above Here +---------------------------+
 
 	// You can add other fields here if you want...
@@ -276,7 +275,6 @@ func InitUser(username string, password string) (userdataptr *User, err error) {
 	public, user.RSAKey, err = userlib.PKEKeyGen()
 	user.UpdateKey = userKey
 	user.FileUUIDs = nil
-	user.FilePerms = nil
 	user.FileKeys = nil
 	user.Address = id
 
@@ -338,8 +336,7 @@ func (userdata *User) StoreFile(filename string, data []byte) {
 	master.UIDBlocks[0] = headUUID
 	rights.Valid = true
 	rights.Root = true
-	magic := string(userlib.RandomBytes(16))
-
+	magic := userdata.Username
 	if master.Authorize == nil {
 		master.Authorize = make(map[string]Permission)
 	}
@@ -352,11 +349,9 @@ func (userdata *User) StoreFile(filename string, data []byte) {
 	// Authorize User
 	if userdata.FileUUIDs == nil {
 		userdata.FileUUIDs = make(map[string]uuid.UUID)
-		userdata.FilePerms = make(map[string]string)
 		userdata.FileKeys = make(map[string][]byte)
 	}
 	userdata.FileUUIDs[filename] = fileUUID
-	userdata.FilePerms[filename] = magic
 	userdata.FileKeys[filename] = fileKey
 
 	// Commit User data
@@ -408,7 +403,7 @@ func (userdata *User) AppendFile(filename string, data []byte) (err error) {
 		return
 	}
 	// Enforce Permission policy
-	if !Authorized(&master, userdata.FilePerms[filename]) {
+	if !Authorized(&master, userdata.Username) {
 		err = errors.New("User is NOT authorized")
 		return
 	}
@@ -462,9 +457,9 @@ func (userdata *User) LoadFile(filename string) (data []byte, err error) {
 		return
 	}
 	// Obtain Master Permission
-	if !Authorized(&master, userdata.FilePerms[filename]) {
-		return nil, errors.New("Permission is invalid")
-
+	magic := userdata.Username
+	if !Authorized(&master, magic) {
+		return nil, errors.New("Not authorized")
 	}
 	// User is Authorized, Load Data and perform all checks
 	for _, v := range master.UIDBlocks {
@@ -541,15 +536,15 @@ func (userdata *User) ShareFile(filename string, recipient string) (
 		return
 	}
 	// Enforce Permission policy
-	if !Authorized(&master, userdata.FilePerms[filename]) {
+	if !Authorized(&master, userdata.Username) {
 		err = errors.New("User is NOT authorized")
 		return
 	}
 
 	// User is Authorized, allow this user to share this file.
-	magic := string(userlib.RandomBytes(16))
-	BRef := userdata.FilePerms[filename]
-	rights.Ref = string(BRef)
+	//	bmagic, _ := userlib.HMACEval(macKey, []byte(recipient))
+	magic := recipient
+	rights.Ref = userdata.Username
 	rights.Root = false
 	rights.Valid = true
 	master.Authorize[magic] = rights
@@ -636,12 +631,10 @@ func (userdata *User) ReceiveFile(filename string, sender string,
 	if userdata.FileKeys == nil {
 		userdata.FileKeys = make(map[string][]byte)
 		userdata.FileUUIDs = make(map[string]uuid.UUID)
-		userdata.FilePerms = make(map[string]string)
 
 	}
 	userdata.FileKeys[filename] = pack.FileKeys
 	userdata.FileUUIDs[filename] = pack.FileUUID
-	userdata.FilePerms[filename] = pack.Permission
 	// Commit User data
 	LockBlock := userlib.RandomBytes(16)
 	CommitUser(userdata, LockBlock)
@@ -659,44 +652,40 @@ func (userdata *User) RevokeFile(filename string, target_username string) (err e
 		return
 	}
 	err = json.Unmarshal(latest, userdata)
-	return err
-	/*
-		// Get Master File from User's UUIDs
-		var master FileMaster
+	// Get Master File from User's UUIDs
+	var master FileMaster
 
-		fileUUID := userdata.FileUUIDs[filename]
-		// Key is to be saved by each individual user
-		fileKey := userdata.FileKeys[filename]
-		// Deterministic MAC
-		macKey, _ := userlib.HMACEval(fileKey, []byte("file-mac-key"))
-		macKey = macKey[:16]
+	fileUUID := userdata.FileUUIDs[filename]
+	// Key is to be saved by each individual user
+	fileKey := userdata.FileKeys[filename]
+	// Deterministic MAC
+	macKey, _ := userlib.HMACEval(fileKey, []byte("file-mac-key"))
+	macKey = macKey[:16]
 
-		// Decrypt Signed File
-		BMaster, ok := PullFile(fileUUID, fileKey, macKey)
-		if !ok {
-			err = errors.New("File was not found in server")
-		}
-		err = json.Unmarshal(BMaster, &master)
-		if err != nil {
-			err = errors.New("File has been damaged")
-			return
-		}
-		// Obtain Master Permission
-		if !Authorized(&master, userdata.FilePerms[filename]) {
-			err = errors.New("User is not authorized")
-			return
-		}
-		// Remove target's permissions
-		tPerm, err := userlib.HMACEval(macKey, []byte(target_username))
-		permRec := master.Authorize[string(tPerm)]
-		permRec.Valid = false
-		master.Authorize[string(tPerm)] = permRec
+	// Decrypt Signed File
+	BMaster, ok := PullFile(fileUUID, fileKey, macKey)
+	if !ok {
+		err = errors.New("File was not found in server")
+	}
+	err = json.Unmarshal(BMaster, &master)
+	if err != nil {
+		err = errors.New("File has been damaged")
+		return
+	}
+	// Obtain Master Permission
+	if !Authorized(&master, userdata.Username) {
+		err = errors.New("User is not authorized")
+		return
+	}
+	// Remove target's permissions
+	//	tPerm, err := userlib.HMACEval(macKey, []byte(target_username))
+	permRec := master.Authorize[target_username]
+	permRec.Valid = false
+	master.Authorize[target_username] = permRec
 
-		// Update Master
-		BMaster, _ = json.Marshal(master)
-		CommitFile(fileUUID, BMaster, fileKey, macKey)
-
-		return err
-	*/
+	// Update Master
+	BMaster, err = json.Marshal(master)
+	CommitFile(fileUUID, BMaster, fileKey, macKey)
+	return nil
 	// +---------------------------+ My Code Above Here +---------------------------+}
 }

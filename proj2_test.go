@@ -252,7 +252,7 @@ func TestMethodFile(t *testing.T) {
 	// Buid Master File
 	master.UIDBlocks = make([]uuid.UUID, 1)
 	master.UIDBlocks[0] = headUUID
-	magic := string(userlib.RandomBytes(16))
+	magic := username
 	rights.Valid = true
 	rights.Root = true
 	if master.Authorize == nil {
@@ -278,10 +278,8 @@ func TestMethodFile(t *testing.T) {
 	if userdata.FileUUIDs == nil {
 		userdata.FileUUIDs = make(map[string]uuid.UUID)
 		userdata.FileKeys = make(map[string][]byte)
-		userdata.FilePerms = make(map[string]string)
 	}
 	userdata.FileUUIDs[filename] = fileUUID
-	userdata.FilePerms[filename] = magic
 	userdata.FileKeys[filename] = fileKey
 
 	// Commit User data
@@ -331,7 +329,7 @@ func TestMethodFile(t *testing.T) {
 	var myFile []byte
 	err = json.Unmarshal(data, &RetFile)
 	t.Log("Diving into table")
-	t.Log("Key expected: ", []byte(user.FilePerms[filename]))
+	t.Log("Key expected: ", []byte(user.Username))
 	for key, val := range RetFile.Authorize {
 		t.Log("Magic held:", []byte(key))
 		t.Log("Permi held:", val)
@@ -342,7 +340,7 @@ func TestMethodFile(t *testing.T) {
 		t.Log("Verifying user permissions")
 		// Simulating Authorize(master, username, key)
 		t.Log("Starting Deep Test | Authorize")
-		perm := user.FilePerms[filename]
+		perm := user.Username
 		var rights Permission
 		for rights = RetFile.Authorize[perm]; !rights.Root; rights = RetFile.Authorize[rights.Ref] {
 			t.Log("Current rights:", rights)
@@ -423,7 +421,7 @@ func TestMethodFile(t *testing.T) {
 	}
 	// Enforce Permission policy
 	t.Log("Starting Deep Test | Authorize")
-	MyPerm := MyUser.FilePerms[filename]
+	MyPerm := MyUser.Username
 	var Rights Permission
 	for Rights = Master.Authorize[MyPerm]; !Rights.Root; Rights = Master.Authorize[Rights.Ref] {
 		t.Log("Current rights:", Rights)
@@ -524,6 +522,63 @@ func TestStoreFile(t *testing.T) {
 	if !reflect.DeepEqual(v, v2) {
 		t.Error("Downloaded file is not the same", v, v2)
 		return
+	}
+}
+
+func TestMethodSharing(t *testing.T) {
+	u, err := InitUser("alice2", "fubar")
+	if err != nil {
+		t.Error("Failed to reload user", err)
+		return
+	}
+	u2, err2 := InitUser("TestBob1", "foobar")
+	if err2 != nil {
+		t.Error("Failed to initialize TestBob1", err2)
+		return
+	}
+	x := []byte("This is a test")
+	fileX := "fileX"
+	u.StoreFile(fileX, x)
+
+	var v, v2 []byte
+	var magic string
+
+	v, err = u.LoadFile(fileX)
+	if err != nil {
+		t.Error("Failed to download the file from alice2", err)
+		return
+	}
+
+	magic, err = u.ShareFile("fileX", "TestBob1")
+	if err != nil {
+		t.Error("Failed to share the a file", err)
+		return
+	}
+	err = u2.ReceiveFile("fileY", "alice2", magic)
+	if err != nil {
+		t.Error("Failed to receive the share message", err)
+		return
+	}
+
+	v2, err = u2.LoadFile("fileY")
+	if err != nil {
+		t.Error("Failed to download the file after sharing", err)
+		return
+	}
+	if !reflect.DeepEqual(v, v2) {
+		t.Error("Shared file is not the same", v, v2)
+		return
+	}
+	err = u.RevokeFile("fileX", "TestBob1")
+	if err != nil {
+		t.Error("Revoke Failed", err)
+	}
+	v3, err2 := u2.LoadFile("fileY")
+	if err2 == nil {
+		t.Error("User still got a hold of the file")
+	} else {
+		t.Log("User error report:", err2)
+		t.Log("User file report:", v3)
 	}
 }
 
