@@ -5,9 +5,7 @@ package proj2
 
 import (
 	_ "encoding/hex"
-	"encoding/json"
 	_ "encoding/json"
-	"errors"
 	_ "errors"
 	"reflect"
 	_ "strconv"
@@ -15,7 +13,6 @@ import (
 	"testing"
 
 	"github.com/cs161-staff/userlib"
-	"github.com/google/uuid"
 	_ "github.com/google/uuid"
 )
 
@@ -40,6 +37,7 @@ func TestInit(t *testing.T) {
 }
 
 // +---------------------------+ My Code Below Here +---------------------------+
+/*
 func TestGetUser(t *testing.T) {
 	t.Log("Getting a User test")
 	userlib.SetDebugStatus(true)
@@ -581,6 +579,315 @@ func TestMethodSharing(t *testing.T) {
 		t.Log("User file report:", v3)
 	}
 }
+*/
+
+func TestInitMultiUsers(t *testing.T) {
+	// Bulk Load Test Many Users
+	load := 3
+	name := make([]string, 1)
+	pass := make([]string, 1)
+	userptrs := make([]*User, 1)
+
+	for i := 0; i < load; i++ {
+		name = append(name, string(userlib.RandomBytes(4)))
+		pass = append(name, string(userlib.RandomBytes(4)))
+		user, err := InitUser(name[i], pass[i])
+		if err != nil {
+			t.Error("Error on user", string(i+1), ":", err)
+		} else {
+			userptrs = append(userptrs, user)
+		}
+	}
+	// Test each user with all other passwords
+	count, total := 0, 0
+	for i := 0; i < load; i++ {
+		for j := 0; j < load; j++ {
+			// Skip the correct answer
+			if i == j {
+				continue
+			}
+			u, err := GetUser(name[i], pass[j])
+			if err == nil {
+				t.Error("Owned user [", string(i+1), "]:", u.Username)
+				count++
+				total++
+			} else {
+				total++
+			}
+
+		}
+	}
+	if count == 0 {
+		t.Log("Protected all users")
+	} else {
+		t.Error("Forfit count: ", float64(count)/float64(total))
+	}
+}
+
+// Test to see if a user can be revoked and respawned.
+func TestInviteSpawn(t *testing.T) {
+	a, _ := InitUser("A", "Apass")
+	b, _ := InitUser("B", "Bpass")
+
+	fileA := []byte("--This is A's File--")
+	a.StoreFile("fileA", fileA)
+	magic, err := a.ShareFile("fileA", "B")
+	if err != nil {
+		t.Error("error", err)
+	}
+	err = b.ReceiveFile("fileB", "A", magic)
+	if err != nil {
+		t.Error("error", err)
+	}
+	fileB, err := b.LoadFile("fileB")
+	if err != nil {
+		t.Error("error", err)
+	}
+	if !reflect.DeepEqual(fileA, fileB) {
+		t.Error("Files are not the same")
+	}
+	err = a.RevokeFile("fileA", "B")
+	_, err = b.LoadFile("fileB")
+	if err == nil {
+		t.Error("User received unauthorized access")
+	}
+	magic2, err := a.ShareFile("fileA", "B")
+	if err != nil {
+		t.Error("error", err)
+	}
+	err = b.ReceiveFile("fileB", "A", magic2)
+	if err != nil {
+		t.Error("error", err)
+	}
+	a.AppendFile("fileA", []byte("update 1a"))
+
+	updateA, err := a.LoadFile("fileA")
+	if err != nil {
+		t.Error("error", err)
+	}
+	updateB, err := b.LoadFile("fileB")
+	if err != nil {
+		t.Error("error", err)
+	}
+	if !reflect.DeepEqual(updateA, updateB) {
+		t.Error("User B did not receive updates")
+	}
+}
+
+// Test to see if another user can open our file.
+func TestOtherAccess(t *testing.T) {
+	// Initialize users (A, B)
+	A, err := InitUser("userA", "passA")
+	if err != nil {
+		t.Error("error", err)
+	}
+	B, err := InitUser("userB", "passB")
+	if err != nil {
+		t.Error("error", err)
+	}
+	// 	User A<- Creates file
+	fileA := []byte("--This is file A--")
+	A.StoreFile("fileA", fileA)
+	//	User B<- Attempts to open the same file - via filename.
+	_, err = B.LoadFile("fileA")
+	if err == nil {
+		t.Error("User gained unauthorized access")
+	}
+	//  User B<- makes a file with a new file with filename.
+	fileB := []byte("--This is file B--")
+	B.StoreFile("fileA", fileB)
+	fileBA, err := B.LoadFile("fileA")
+	if err != nil {
+		t.Error("error", err)
+	}
+	//  Verify no leaks occured.
+	if reflect.DeepEqual(fileA, fileBA) {
+		t.Error("Filename led to leaks")
+	}
+}
+
+/*
+// Test to see if live updates occur
+func TestMultiAccess(t *testing.T) {
+	// Initialize Users, (A, B, C, D)
+	A, err := InitUser("UserA", "passA")
+	if err != nil {
+		t.Error("error", err)
+	}
+	B, err := InitUser("UserB", "passB")
+	if err != nil {
+		t.Error("error", err)
+	}
+	C, err := InitUser("UserC", "passC")
+	if err != nil {
+		t.Error("error", err)
+	}
+	D, err := InitUser("UserD", "passD")
+	if err != nil {
+		t.Error("error", err)
+	}
+	// User A<- Creates a file, 'fileA'
+	fileA := []byte("--This is file A--")
+	A.StoreFile("fileA", fileA)
+	magicB, err := A.ShareFile("fileA", "UserB")
+	if err != nil {
+		t.Error("error", err)
+	}
+	magicC, err := A.ShareFile("fileA", "userC")
+	if err != nil {
+		t.Error("error", err)
+	}
+	magicD, err := A.ShareFile("fileA", "userD")
+	if err != nil {
+		t.Error("error", err)
+	}
+	// User B<- Receives 'fileA' from A
+	B.ReceiveFile("fileAB", "userA", magicB)
+	// User C<- Receives 'fileA' from A
+	C.ReceiveFile("fileAC", "userA", magicC)
+	// User D<- Receives 'fileB' from A
+	D.ReceiveFile("fileAD", "userA", magicD)
+	// For all users [i]:
+	Users := []*User{A, B, C, D}
+	Files := []string{"fileA", "fileAB", "fileAC", "fileAD"}
+	var file, cursor []byte
+	for i := 0; i < len(Users); i++ {
+		// Verify all users received update.
+		err := Users[i].AppendFile(Files[i], []byte("update"))
+		file, err = Users[i].LoadFile(Files[i])
+		if err != nil {
+			t.Error("User could not update file.", err)
+		}
+		for j := 0; j < len(Users); j++ {
+			// User [i] updates 'file[i]' <-> 'fileA'
+			if i != j {
+				cursor, err = Users[j].LoadFile(Files[j])
+				if !reflect.DeepEqual(file, cursor) {
+					t.Error("User did not see update")
+				}
+			}
+		}
+	}
+
+}
+
+// test to see if a user can share a shared file.
+func TestSharingShares(t *testing.T) {
+	// Load Users, (A, B, C)
+	A, err := GetUser("userA", "passA")
+	if err != nil {
+		t.Error("error", err)
+	}
+	B, err := GetUser("userB", "passB")
+	if err != nil {
+		t.Error("error", err)
+	}
+	C, err := GetUser("userC", "passC")
+	if err != nil {
+		t.Error("error", err)
+	}
+	// User A<- Creates a file, 'mutual'
+	mutual := []byte("-- This is mutual --")
+	A.StoreFile("mutual", mutual)
+	magic, err := A.ShareFile("mutual", "userB")
+	if err != nil {
+		t.Error("error", err)
+	}
+	// User B<- Receives a file from A
+	err = B.ReceiveFile("mutual", "userA", magic)
+	if err != nil {
+		t.Error("error", err)
+	}
+	magic2, err := B.ShareFile("mutual", "userC")
+	if err != nil {
+		t.Error("error", err)
+	}
+	// User C<- Receives 'mutual' from B
+	err = C.ReceiveFile("mutual", "userB", magic2)
+	if err != nil {
+		t.Error("error", err)
+	}
+}
+
+/*
+// Test to see if a revoked user can access updates.
+func TestRevokeUpdates(t *testing.T) {
+	// Load Users, (A, C)
+	A, err := GetUser("userA", "passA")
+	C, err := GetUser("userC", "passC")
+	// User A Revokes access to C
+	err = A.RevokeFile("mutual", "userC")
+	A.AppendFile("mutual", []byte("-A was here"))
+	latest, err := A.LoadFile("mutual")
+	err = A.RevokeFile("mutual", "userC")
+	// Ensure C does not see update.
+	update, err := C.LoadFile("mutual")
+	if err == nil {
+		t.Error("Update was not prevented")
+	}
+}
+
+// Test to see if a revoked user's invitation is valid.
+func TestRevokeFriends(t *testing.T) {
+	// Load Users, (A, B, C)
+	A, err := GetUser("userA", "passA")
+	B, err := GetUser("userB", "passB")
+	C, err := GetUser("userC", "passC")
+	// User B invites C
+	magic, err := B.ShareFile("mutual", "userC")
+	err = C.ReceiveFile("mutual", "userB", magic)
+}
+
+
+// Test to see if a different user can use a magicstring.
+func TestNotMyMagic(t *testing.T) {
+	// Create Users, (x, Y, Z)
+	X, err := InitUser("userX", "passX")
+	Y, err := InitUser("userY", "passY")
+	Z, err := InitUser("userZ", "passZ")
+	// User X creates a file
+	fileX := []byte("This is file X")
+	X.StoreFile("fileX", fileX)
+	magic, err := X.ShareFile("fileX", "userY")
+	// User Z snoops magic_string and attempts
+	// - 1. Pre Snoop
+	err = Z.ReceiveFile("fileX", "userX", magic)
+	// User Y receives file from X
+	err = Y.ReceiveFile("fileX", "userX", magic)
+	// - 2. Post Snoop
+	err = Z.ReceiveFile("fileX", "userX", magic)
+}
+
+// Test to see if multiple user's can update the same file.
+func TestMultiUpdates(t *testing.T) {
+	// Load Users, (A, B, C)
+	// User A Creates new 'fileA'
+	// User B<- Receives 'fileA' from A
+	// User C<- Receives 'FileB' from B
+	// Ensure everyone sees updates
+}
+
+// Test to see if a revoked user can regain access via magic string.
+func TestRecycleMagic(t *testing.T) {
+	// Load Users X, Y
+	// User Y receives file2 from X
+	// User X revokes Y from file2
+	// User Y reuses magic1 for file2
+
+}
+
+// Test to see if owner and friend can access after revoking someone.
+func TestNotMyProblem(t *testing.T) {
+	// Load Users A, B, C
+	// User C creates a new 'fileC'
+	// User B receives fileC from C
+	// User A receives fileC from B
+	// User C revokes fileC from User A
+	// User C updates
+	// User B receives update
+}
+*/
+// Test
 
 // +---------------------------+ My Code Above Here +---------------------------+
 
